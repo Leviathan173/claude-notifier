@@ -28,6 +28,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 $AppId = "ClaudeCode.Notifier"
+$LogFile = "$env:TEMP\claude-notifier.log"
+
+function Write-Log {
+    param([string]$Msg)
+    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+    "[$ts] $Msg" | Out-File -FilePath $LogFile -Append -Encoding utf8
+}
 
 # ═══════════════════════════════════════════════════════════════════════════
 # One-time AppUserModelID registration
@@ -188,11 +195,10 @@ function Show-Toast {
         $toast.ExpirationTime = [DateTime]::Now.AddMinutes(1)
 
         [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($AppId).Show($toast)
+        Write-Log "TOAST OK: Title='$Title' Message='$Message' Sound='$SoundAlias'"
     }
     catch {
-        # Toast failed — fall back to a console beep so the user still gets
-        # an audible signal.  We write nothing to stdout to avoid polluting
-        # the Claude Code hook transcript.
+        Write-Log "TOAST FAIL: $_"
         try { [Console]::Beep(800, 200) } catch { }
     }
 }
@@ -201,5 +207,7 @@ function Show-Toast {
 # Main
 # ═══════════════════════════════════════════════════════════════════════════
 
+Write-Log "START: Title='$Title' Message='$Message' Sound='$Sound'"
 Register-AppUserModelID
 Show-Toast -Title $Title -Message $Message -SoundAlias $Sound
+Write-Log "END"

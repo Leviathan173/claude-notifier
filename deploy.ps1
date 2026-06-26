@@ -75,6 +75,10 @@ if ($Uninstall) {
         Remove-Item $destScript -Force
         Write-Host "Removed $destScript" -ForegroundColor Green
     }
+    if (Test-Path "$scriptsDir\hook-wrapper.cmd") {
+        Remove-Item "$scriptsDir\hook-wrapper.cmd" -Force
+        Write-Host "Removed $scriptsDir\hook-wrapper.cmd" -ForegroundColor Green
+    }
     else {
         Write-Host "Script not found at $destScript — already removed." -ForegroundColor Gray
     }
@@ -108,7 +112,8 @@ if (-not (Test-Path $sourceScript)) {
 }
 
 Copy-Item -Force $sourceScript -Destination $destScript
-Write-Host "[2/3] Copied $scriptName -> $scriptsDir\" -ForegroundColor Green
+Copy-Item -Force "$PSScriptRoot\src\hook-wrapper.cmd" -Destination "$scriptsDir\hook-wrapper.cmd"
+Write-Host "[2/3] Copied scripts -> $scriptsDir\" -ForegroundColor Green
 
 # 3. Merge hooks into settings.json
 Write-Host "[3/3] Merging hooks into settings.json ..."

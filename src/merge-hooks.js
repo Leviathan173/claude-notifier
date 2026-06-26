@@ -43,25 +43,30 @@ if (action === 'install') {
     // and they don't need JSON escaping (avoids quadruple-backslash mess)
     const scriptPathFwd = scriptPath.replace(/\\/g, '/');
 
+    // Wrapper path: same dir as the notification script, but hook-wrapper.cmd
+    const wrapperPathFwd = scriptPathFwd.replace(/show-notification\.ps1$/, 'hook-wrapper.cmd');
+
+    // Use cmd /c to call the wrapper batch file.
+    // This completely avoids PowerShell quoting issues in hooks.
     const hookDefs = [
         {
             event: 'Stop',
             matcher: '',
-            command: `powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPathFwd}" -Title "Claude Code" -Message "Task completed — Claude is waiting for you" -Sound "Default"`,
+            command: `cmd /c "${wrapperPathFwd}" "Task completed - Claude waiting"`,
             timeout: 5,
             desc: 'Stop (task completion)',
         },
         {
             event: 'SubagentStop',
             matcher: '',
-            command: `powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPathFwd}" -Title "Claude Code" -Message "Subagent task completed" -Sound "Default"`,
+            command: `cmd /c "${wrapperPathFwd}" "Subagent task completed"`,
             timeout: 5,
             desc: 'SubagentStop (subagent completion)',
         },
         {
             event: 'PreToolUse',
             matcher: 'AskUserQuestion',
-            command: `powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPathFwd}" -Title "Claude Code — Input Needed" -Message "Claude needs your response — a question is waiting for you" -Sound "IM"`,
+            command: `cmd /c "${wrapperPathFwd}" "Claude needs your input"`,
             timeout: 5,
             desc: 'PreToolUse (needs user input)',
         },
@@ -148,7 +153,7 @@ else if (action === 'uninstall') {
         settings.hooks[event] = settings.hooks[event].filter((entry) => {
             if (!entry.hooks || !entry.hooks[0]) return true; // keep unknown entries
             const cmd = entry.hooks[0].command || '';
-            return !cmd.includes('show-notification.ps1');
+            return !cmd.includes('show-notification.ps1') && !cmd.includes('hook-wrapper.cmd');
         });
         const after = settings.hooks[event].length;
 
