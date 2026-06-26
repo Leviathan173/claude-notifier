@@ -1,0 +1,10 @@
+# Logs
+*.log
+*.tmp
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# PowerShell
+*.ps1xml
