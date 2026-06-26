@@ -67,7 +67,23 @@ if (action === 'install') {
             command: 'cmd',
             args: ['/c', wrapperPath, 'Claude needs your input'],
             timeout: 5,
-            desc: 'PreToolUse (needs user input)',
+            desc: 'PreToolUse / AskUserQuestion (user question)',
+        },
+        {
+            event: 'Elicitation',
+            matcher: '',
+            command: 'cmd',
+            args: ['/c', wrapperPath, 'Claude needs your response - Elicitation dialog'],
+            timeout: 5,
+            desc: 'Elicitation (auto mode / form / dialog)',
+        },
+        {
+            event: 'PermissionRequest',
+            matcher: '',
+            command: 'cmd',
+            args: ['/c', wrapperPath, 'Claude needs permission approval'],
+            timeout: 5,
+            desc: 'PermissionRequest (tool permission needed)',
         },
     ];
 
