@@ -3,7 +3,9 @@
     One-click deploy / uninstall for the Claude Code Windows toast notifier.
 .DESCRIPTION
     Copies the notification script to ~/.claude/scripts/ and merges the
-    required hooks into ~/.claude/settings.json.  No external dependencies.
+    required hooks into ~/.claude/settings.json using Node.js for reliable
+    JSON manipulation (PowerShell ConvertFrom-Json can choke on complex
+    settings.json files).
 .PARAMETER Uninstall
     Removes the hooks from settings.json and deletes the notification script.
 .EXAMPLE
@@ -14,23 +16,35 @@
 param([switch]$Uninstall)
 
 $ErrorActionPreference = "Stop"
-$claudeDir   = "$env:USERPROFILE\.claude"
-$scriptsDir  = "$claudeDir\scripts"
+
+$claudeDir    = "$env:USERPROFILE\.claude"
+$scriptsDir   = "$claudeDir\scripts"
 $settingsFile = "$claudeDir\settings.json"
-$scriptName  = "show-notification.ps1"
+$scriptName   = "show-notification.ps1"
 $sourceScript = "$PSScriptRoot\src\$scriptName"
 $destScript   = "$scriptsDir\$scriptName"
+$mergeJs      = "$PSScriptRoot\src\merge-hooks.js"
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Helper: detect if running in bash (Git Bash / MSYS2)
-# ═══════════════════════════════════════════════════════════════════════════
+# ── Helper: find Node.js ───────────────────────────────────────────────────
 
-function Get-NativePath([string]$Path) {
-    # Git Bash maps C:\ → /c/, but PowerShell needs native Windows paths.
-    if ($Path -match '^/([a-zA-Z])/') {
-        return "$($Matches[1].ToUpper()):\$($Path.Substring(3) -replace '/','\')"
+function Find-Node {
+    # Try 'node' on PATH (works in most environments)
+    $node = Get-Command node -ErrorAction SilentlyContinue
+    if ($node) { return $node.Source }
+
+    # Common install locations
+    $candidates = @(
+        "$env:ProgramFiles\nodejs\node.exe",
+        "${env:ProgramFiles(x86)}\nodejs\node.exe",
+        "$env:LOCALAPPDATA\fnm_multishells\*\node.exe",
+        "$env:APPDATA\nvm\*\node.exe"
+    )
+    foreach ($c in $candidates) {
+        $found = Get-Item $c -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) { return $found.FullName }
     }
-    return $Path
+
+    throw "Node.js not found.  Please install Node.js or add it to your PATH."
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -39,47 +53,21 @@ function Get-NativePath([string]$Path) {
 
 if ($Uninstall) {
     Write-Host "=== Uninstalling Claude Code Notifier ===" -ForegroundColor Yellow
+    Write-Host ""
+
+    $nodeExe = Find-Node
 
     # Remove hooks from settings.json
     if (Test-Path $settingsFile) {
         Write-Host "Removing notification hooks from settings.json ..."
-        $settings = Get-Content -Raw $settingsFile | ConvertFrom-Json
 
-        if ($settings.hooks) {
-            $removed = $false
-            $events = @("Stop", "SubagentStop", "PreToolUse")
-            foreach ($event in $events) {
-                if ($settings.hooks.$event) {
-                    $before = $settings.hooks.$event.Count
-                    $settings.hooks.$event = @(
-                        $settings.hooks.$event | Where-Object {
-                            $_.hooks[0].command -notmatch 'claude-notifier|claude.*scripts.*show-notification'
-                        }
-                    )
-                    $after = $settings.hooks.$event.Count
-                    if ($after -eq 0) {
-                        $settings.hooks.PSObject.Properties.Remove($event)
-                    }
-                    if ($before -ne $after) { $removed = $true }
-                }
-            }
-
-            # If hooks object is now empty, remove it
-            if ($settings.hooks.PSObject.Properties.Count -eq 0) {
-                $settings.PSObject.Properties.Remove('hooks')
-            }
-
-            if ($removed) {
-                $settings | ConvertTo-Json -Depth 10 | Out-File -FilePath $settingsFile -Encoding utf8
-                Write-Host "  Hooks removed." -ForegroundColor Green
-            }
-            else {
-                Write-Host "  No matching hooks found." -ForegroundColor Gray
-            }
+        if (-not (Test-Path $mergeJs)) {
+            Write-Host "ERROR: merge-hooks.js not found at $mergeJs" -ForegroundColor Red
+            exit 1
         }
-        else {
-            Write-Host "  No hooks configured — nothing to remove." -ForegroundColor Gray
-        }
+
+        $result = & $nodeExe $mergeJs uninstall $settingsFile 2>&1
+        Write-Host $result
     }
 
     # Remove notification script
@@ -91,7 +79,8 @@ if ($Uninstall) {
         Write-Host "Script not found at $destScript — already removed." -ForegroundColor Gray
     }
 
-    Write-Host "`nUninstall complete. Restart Claude Code for changes to take effect." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Uninstall complete. Restart Claude Code for changes to take effect." -ForegroundColor Yellow
     exit 0
 }
 
@@ -119,7 +108,7 @@ if (-not (Test-Path $sourceScript)) {
 }
 
 Copy-Item -Force $sourceScript -Destination $destScript
-Write-Host "[2/3] Copied $scriptName → $scriptsDir\" -ForegroundColor Green
+Write-Host "[2/3] Copied $scriptName -> $scriptsDir\" -ForegroundColor Green
 
 # 3. Merge hooks into settings.json
 Write-Host "[3/3] Merging hooks into settings.json ..."
@@ -130,93 +119,26 @@ if (-not (Test-Path $settingsFile)) {
     exit 1
 }
 
-$settings = Get-Content -Raw $settingsFile | ConvertFrom-Json
-
-# Ensure hooks property exists
-if (-not $settings.hooks) {
-    $settings | Add-Member -NotePropertyName 'hooks' -NotePropertyValue @{} -Force
+if (-not (Test-Path $mergeJs)) {
+    Write-Host "ERROR: merge-hooks.js not found at $mergeJs" -ForegroundColor Red
+    exit 1
 }
 
-# Escape the destScript path for use in the command string
-# Use double-backslash for JSON
-$escapedScript = $destScript.Replace('\', '\\')
+$nodeExe = Find-Node
+$result = & $nodeExe $mergeJs install $settingsFile $destScript 2>&1
+Write-Host $result
 
-# Define the hook entries we want to add
-$hookDefs = @(
-    @{
-        Event   = "Stop"
-        Matcher = ""
-        Command = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$escapedScript`" -Title `"Claude Code`" -Message `"Task completed — Claude is waiting for you`" -Sound `"Default`""
-        Timeout = 5
-        Desc    = "Stop (task completion)"
-    },
-    @{
-        Event   = "SubagentStop"
-        Matcher = ""
-        Command = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$escapedScript`" -Title `"Claude Code`" -Message `"Subagent task completed`" -Sound `"Default`""
-        Timeout = 5
-        Desc    = "SubagentStop (subagent completion)"
-    },
-    @{
-        Event   = "PreToolUse"
-        Matcher = "AskUserQuestion"
-        Command = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$escapedScript`" -Title `"Claude Code — Input Needed`" -Message `"Claude needs your response — a question is waiting for you`" -Sound `"IM`""
-        Timeout = 5
-        Desc    = "PreToolUse (needs user input)"
-    }
-)
-
-$addedCount = 0
-$skippedCount = 0
-
-foreach ($def in $hookDefs) {
-    $event = $def.Event
-
-    # Ensure the event array exists
-    if (-not $settings.hooks.$event) {
-        $settings.hooks | Add-Member -NotePropertyName $event -NotePropertyValue @() -Force
-    }
-
-    # Check if an identical entry already exists
-    $exists = $false
-    foreach ($entry in $settings.hooks.$event) {
-        if ($entry.hooks -and $entry.hooks[0].command -eq $def.Command) {
-            $exists = $true
-            break
-        }
-    }
-
-    if ($exists) {
-        Write-Host "  [skip] $($def.Desc) — already configured" -ForegroundColor Gray
-        $skippedCount++
-        continue
-    }
-
-    # Build the hook entry
-    $hookEntry = @{
-        hooks = @(
-            @{
-                type    = "command"
-                command = $def.Command
-                timeout = $def.Timeout
-            }
-        )
-    }
-
-    if ($def.Matcher) {
-        $hookEntry['matcher'] = $def.Matcher
-    }
-
-    # Append to the event array
-    $newArray = @($settings.hooks.$event) + $hookEntry
-    $settings.hooks.$event = $newArray
-
-    Write-Host "  [add] $($def.Desc)" -ForegroundColor Green
-    $addedCount++
+# Parse the JSON summary from the last line
+$summaryLine = ($result | Where-Object { $_ -match '^\{"added"' }) | Select-Object -Last 1
+if ($summaryLine) {
+    $summary = $summaryLine | ConvertFrom-Json
+    $addedCount   = $summary.added
+    $skippedCount = $summary.skipped
 }
-
-# Write back settings.json
-$settings | ConvertTo-Json -Depth 10 | Out-File -FilePath $settingsFile -Encoding utf8
+else {
+    $addedCount   = 0
+    $skippedCount = 0
+}
 
 Write-Host ""
 Write-Host "=== Deploy Complete ===" -ForegroundColor Cyan

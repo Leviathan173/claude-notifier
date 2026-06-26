@@ -38,8 +38,8 @@ $AppId = "ClaudeCode.Notifier"
 # (~200 ms); subsequent invocations skip it entirely.
 
 function Register-AppUserModelID {
-    $startMenu    = [Environment]::GetFolderPath('StartMenu')
-    $programsDir  = Join-Path $startMenu "Programs"
+    # Use the *user* Start Menu (no admin required), not the All Users one
+    $programsDir  = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs"
     $shortcutPath = Join-Path $programsDir "Claude Code Notification.lnk"
 
     if (Test-Path $shortcutPath) { return }
