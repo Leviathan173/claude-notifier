@@ -113,7 +113,8 @@ if (-not (Test-Path $sourceScript)) {
 
 Copy-Item -Force $sourceScript -Destination $destScript
 Copy-Item -Force "$PSScriptRoot\src\hook-wrapper.cmd" -Destination "$scriptsDir\hook-wrapper.cmd"
-Write-Host "[2/3] Copied scripts -> $scriptsDir\" -ForegroundColor Green
+Copy-Item -Force "$PSScriptRoot\src\notification.wav" -Destination "$scriptsDir\notification.wav"
+Write-Host "[2/3] Copied scripts + sound -> $scriptsDir\" -ForegroundColor Green
 
 # 3. Merge hooks into settings.json
 Write-Host "[3/3] Merging hooks into settings.json ..."
