@@ -39,34 +39,33 @@ if (action === 'install') {
         process.exit(1);
     }
 
-    // Use forward slashes — PowerShell handles them natively,
-    // and they don't need JSON escaping (avoids quadruple-backslash mess)
-    const scriptPathFwd = scriptPath.replace(/\\/g, '/');
-
     // Wrapper path: same dir as the notification script, but hook-wrapper.cmd
-    const wrapperPathFwd = scriptPathFwd.replace(/show-notification\.ps1$/, 'hook-wrapper.cmd');
+    const wrapperPath = require('path').dirname(scriptPath) + '\\hook-wrapper.cmd';
 
-    // Use cmd /c to call the wrapper batch file.
-    // This completely avoids PowerShell quoting issues in hooks.
+    // Use exec form: command=executable, args=arguments array.
+    // This spawns the process directly without a shell — no quoting issues AT ALL.
     const hookDefs = [
         {
             event: 'Stop',
             matcher: '',
-            command: `cmd /c "${wrapperPathFwd}" "Task completed - Claude waiting"`,
+            command: 'cmd',
+            args: ['/c', wrapperPath, 'Task completed - Claude waiting'],
             timeout: 5,
             desc: 'Stop (task completion)',
         },
         {
             event: 'SubagentStop',
             matcher: '',
-            command: `cmd /c "${wrapperPathFwd}" "Subagent task completed"`,
+            command: 'cmd',
+            args: ['/c', wrapperPath, 'Subagent task completed'],
             timeout: 5,
             desc: 'SubagentStop (subagent completion)',
         },
         {
             event: 'PreToolUse',
             matcher: 'AskUserQuestion',
-            command: `cmd /c "${wrapperPathFwd}" "Claude needs your input"`,
+            command: 'cmd',
+            args: ['/c', wrapperPath, 'Claude needs your input'],
             timeout: 5,
             desc: 'PreToolUse (needs user input)',
         },
@@ -86,9 +85,11 @@ if (action === 'install') {
             settings.hooks[def.event] = [];
         }
 
-        // Check for duplicate
+        // Check for duplicate (match both command and args)
         const exists = settings.hooks[def.event].some(
-            (entry) => entry.hooks && entry.hooks[0] && entry.hooks[0].command === def.command
+            (entry) => entry.hooks && entry.hooks[0] &&
+                entry.hooks[0].command === def.command &&
+                JSON.stringify(entry.hooks[0].args) === JSON.stringify(def.args || [])
         );
 
         if (exists) {
@@ -97,15 +98,18 @@ if (action === 'install') {
             continue;
         }
 
-        // Build hook entry
+        // Build hook entry (exec form: command + args, no shell)
+        const hookObj = {
+            type: 'command',
+            command: def.command,
+            timeout: def.timeout,
+        };
+        if (def.args) {
+            hookObj.args = def.args;
+        }
+
         const entry = {
-            hooks: [
-                {
-                    type: 'command',
-                    command: def.command,
-                    timeout: def.timeout,
-                },
-            ],
+            hooks: [hookObj],
         };
 
         if (def.matcher) {
