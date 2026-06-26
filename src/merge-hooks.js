@@ -39,28 +39,29 @@ if (action === 'install') {
         process.exit(1);
     }
 
-    // Normalize backslashes for JSON
-    const escapedScript = scriptPath.replace(/\\/g, '\\\\');
+    // Use forward slashes — PowerShell handles them natively,
+    // and they don't need JSON escaping (avoids quadruple-backslash mess)
+    const scriptPathFwd = scriptPath.replace(/\\/g, '/');
 
     const hookDefs = [
         {
             event: 'Stop',
             matcher: '',
-            command: `powershell -NoProfile -ExecutionPolicy Bypass -File "${escapedScript}" -Title "Claude Code" -Message "Task completed — Claude is waiting for you" -Sound "Default"`,
+            command: `powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPathFwd}" -Title "Claude Code" -Message "Task completed — Claude is waiting for you" -Sound "Default"`,
             timeout: 5,
             desc: 'Stop (task completion)',
         },
         {
             event: 'SubagentStop',
             matcher: '',
-            command: `powershell -NoProfile -ExecutionPolicy Bypass -File "${escapedScript}" -Title "Claude Code" -Message "Subagent task completed" -Sound "Default"`,
+            command: `powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPathFwd}" -Title "Claude Code" -Message "Subagent task completed" -Sound "Default"`,
             timeout: 5,
             desc: 'SubagentStop (subagent completion)',
         },
         {
             event: 'PreToolUse',
             matcher: 'AskUserQuestion',
-            command: `powershell -NoProfile -ExecutionPolicy Bypass -File "${escapedScript}" -Title "Claude Code — Input Needed" -Message "Claude needs your response — a question is waiting for you" -Sound "IM"`,
+            command: `powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPathFwd}" -Title "Claude Code — Input Needed" -Message "Claude needs your response — a question is waiting for you" -Sound "IM"`,
             timeout: 5,
             desc: 'PreToolUse (needs user input)',
         },
