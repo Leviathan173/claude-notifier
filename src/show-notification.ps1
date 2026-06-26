@@ -1,23 +1,19 @@
 <#
 .SYNOPSIS
-    Sends a Windows toast notification for Claude Code hooks.
+    Shows a desktop notification with sound for Claude Code hooks.
 .DESCRIPTION
-    Uses the native WinRT toast notification API — zero dependencies.
-    On first run, registers a Start Menu shortcut with the required
-    AppUserModelID so that toast notifications are routed correctly.
+    Uses NotifyIcon balloon tips for visual notification.
+    Sound: plays custom .wav file if available, otherwise falls back to
+    system sounds.  Place a "notification.wav" next to this script to use
+    your own sound — it will be picked up automatically.
 .PARAMETER Title
-    Title text shown on the first line of the toast.
+    Notification title.
 .PARAMETER Message
-    Body text shown on the second line of the toast.
+    Notification body text.
 .PARAMETER Sound
-    Audio cue alias. Supported values:
-      Default, IM, Mail, Reminder, SMS, Alarm, Silent.
-    Prepended with "ms-winsoundevent:Notification." automatically.
-.EXAMPLE
-    powershell -File show-notification.ps1 -Title "Claude Code" -Message "Done" -Sound "Default"
-.NOTES
-    Part of the claude-notifier project — deployed to ~/.claude/scripts/
-    by deploy.ps1 and invoked by Claude Code hooks.
+    One of: Default, IM, Mail, Reminder, SMS, Alarm, Silent
+    OR a path to a .wav file (e.g. "C:\sounds\ding.wav")
+    If omitted, looks for "notification.wav" alongside this script.
 #>
 
 param(
@@ -27,8 +23,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$AppId = "ClaudeCode.Notifier"
 $LogFile = "$env:TEMP\claude-notifier.log"
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 function Write-Log {
     param([string]$Msg)
@@ -36,178 +32,96 @@ function Write-Log {
     "[$ts] $Msg" | Out-File -FilePath $LogFile -Append -Encoding utf8
 }
 
+Write-Log "START: Title='$Title' Message='$Message' Sound='$Sound'"
+
 # ═══════════════════════════════════════════════════════════════════════════
-# One-time AppUserModelID registration
+# Sound — supports .wav files and system sound aliases
 # ═══════════════════════════════════════════════════════════════════════════
-# Windows requires a registered AppUserModelID for toast notifications from
-# non-packaged (desktop) applications.  We create a Start Menu shortcut with
-# the AppUserModelID property set via COM interop.  This is a one-time cost
-# (~200 ms); subsequent invocations skip it entirely.
 
-function Register-AppUserModelID {
-    # Use the *user* Start Menu (no admin required), not the All Users one
-    $programsDir  = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs"
-    $shortcutPath = Join-Path $programsDir "Claude Code Notification.lnk"
+function Play-NotifySound {
+    param([string]$SoundArg)
 
-    if (Test-Path $shortcutPath) { return }
-
-    if (-not (Test-Path $programsDir)) {
-        New-Item -ItemType Directory -Path $programsDir -Force | Out-Null
+    if ($SoundArg -eq "Silent") {
+        Write-Log "SOUND: silent (skipped)"
+        return
     }
 
-    try {
-        # Create the shortcut via WScript.Shell
-        $ws = New-Object -ComObject WScript.Shell
-        $sc = $ws.CreateShortcut($shortcutPath)
-        $sc.TargetPath       = (Get-Command powershell.exe).Source
-        $sc.Arguments        = '-NoProfile -Command "exit"'
-        $sc.WorkingDirectory = "%USERPROFILE%"
-        $sc.Save()
-
-        # Use C# P/Invoke to write the AppUserModelID property on the .lnk
-        $csharp = @'
-using System;
-using System.Runtime.InteropServices;
-
-[ComImport]
-[Guid("00021401-0000-0000-C000-000000000046")]
-internal class ShellLink { }
-
-[ComImport]
-[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-[Guid("000214F9-0000-0000-C000-000000000046")]
-internal interface IShellLinkW {
-    void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszFile, int cchMaxPath, out IntPtr pfd, uint fFlags);
-    void GetIDList(out IntPtr ppidl);
-    void SetIDList(IntPtr pidl);
-    void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszFile, int cchMaxName);
-    void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
-    void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszDir, int cchMaxPath);
-    void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
-    void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszArgs, int cchMaxPath);
-    void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
-    void GetHotkey(out ushort pwHotkey);
-    void SetHotkey(ushort wHotkey);
-    void GetShowCmd(out int piShowCmd);
-    void SetShowCmd(int iShowCmd);
-    void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pszIconPath, int cchIconPath, out int piIcon);
-    void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
-    void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, uint dwReserved);
-    void Resolve(IntPtr hwnd, uint fFlags);
-    void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
-}
-
-[ComImport]
-[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-[Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")]
-internal interface IPropertyStore {
-    uint GetCount(out uint cProps);
-    uint GetAt(uint iProp, out PROPERTYKEY pkey);
-    uint GetValue(ref PROPERTYKEY key, out PROPVARIANT pv);
-    uint SetValue(ref PROPERTYKEY key, ref PROPVARIANT pv);
-    uint Commit();
-}
-
-[StructLayout(LayoutKind.Sequential)]
-internal struct PROPERTYKEY {
-    public Guid fmtid;
-    public uint pid;
-}
-
-[StructLayout(LayoutKind.Explicit)]
-internal struct PROPVARIANT {
-    [FieldOffset(0)] public ushort vt;
-    [FieldOffset(8)] public IntPtr pwszVal;
-}
-
-public static class ShortcutHelper {
-    private static readonly PROPERTYKEY AppUserModelIDKey = new PROPERTYKEY {
-        fmtid = new Guid("{9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}"),
-        pid = 5
-    };
-
-    public static void SetAppUserModelID(string shortcutPath, string appId) {
-        var shellLink = (IShellLinkW)new ShellLink();
-        var persistFile = (System.Runtime.InteropServices.ComTypes.IPersistFile)shellLink;
-        persistFile.Load(shortcutPath, 0);
-
-        var propertyStore = (IPropertyStore)shellLink;
-        var propKey = AppUserModelIDKey;
-        var handle = GCHandle.Alloc(appId, GCHandleType.Pinned);
+    # ── 1. Explicit .wav path (absolute or relative) ──────────────────
+    if ($SoundArg -match '\.wav$' -and (Test-Path $SoundArg)) {
         try {
-            var pv = new PROPVARIANT { vt = 31, pwszVal = handle.AddrOfPinnedObject() };
-            propertyStore.SetValue(ref propKey, ref pv);
-            propertyStore.Commit();
+            $player = New-Object System.Media.SoundPlayer
+            $player.SoundLocation = (Resolve-Path $SoundArg).Path
+            $player.Play()
+            Write-Log "SOUND: custom wav='$SoundArg'"
+            return
         }
-        finally { handle.Free(); }
-
-        persistFile.Save(shortcutPath, false);
+        catch {
+            Write-Log "SOUND FAIL (custom wav): $_"
+        }
     }
-}
-'@
-        Add-Type -TypeDefinition $csharp -ErrorAction Stop
-        [ShortcutHelper]::SetAppUserModelID($shortcutPath, $AppId)
+
+    # ── 2. "notification.wav" alongside this script (auto-discovery) ──
+    $autoWav = Join-Path $ScriptDir "notification.wav"
+    if (Test-Path $autoWav) {
+        try {
+            $player = New-Object System.Media.SoundPlayer
+            $player.SoundLocation = $autoWav
+            $player.Play()
+            Write-Log "SOUND: auto-discovered wav='$autoWav'"
+            return
+        }
+        catch {
+            Write-Log "SOUND FAIL (auto wav): $_"
+        }
     }
-    catch {
-        Write-Warning "Failed to register AppUserModelID: $_"
-    }
-}
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Toast notification
-# ═══════════════════════════════════════════════════════════════════════════
-
-function Show-Toast {
-    param([string]$Title, [string]$Message, [string]$SoundAlias)
-
+    # ── 3. Fall back to system sound alias ─────────────────────────────
     try {
-        # Load WinRT types (may throw if not on a supported Windows version)
-        [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
-        [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
-
-        # Xml-escape the user-provided strings
-        $safeTitle   = [System.Security.SecurityElement]::Escape($Title)
-        $safeMessage = [System.Security.SecurityElement]::Escape($Message)
-
-        $audio = if ($SoundAlias -eq "Silent") {
-            "<audio silent='true' />"
+        switch ($SoundArg) {
+            "IM"     { [System.Media.SystemSounds]::Exclamation.Play(); break }
+            "Alarm"  { [System.Media.SystemSounds]::Hand.Play(); break }
+            "Mail"   { [System.Media.SystemSounds]::Asterisk.Play(); break }
+            "Reminder"{ [System.Media.SystemSounds]::Asterisk.Play(); break }
+            "SMS"    { [System.Media.SystemSounds]::Exclamation.Play(); break }
+            default  { [System.Media.SystemSounds]::Asterisk.Play(); break }
         }
-        else {
-            "<audio src='ms-winsoundevent:Notification.$SoundAlias' />"
-        }
-
-        $xmlText = @"
-<toast duration="short">
-    <visual>
-        <binding template="ToastGeneric">
-            <text>$safeTitle</text>
-            <text>$safeMessage</text>
-        </binding>
-    </visual>
-    $audio
-</toast>
-"@
-
-        $xmlDoc = New-Object Windows.Data.Xml.Dom.XmlDocument
-        $xmlDoc.LoadXml($xmlText)
-
-        $toast = New-Object Windows.UI.Notifications.ToastNotification $xmlDoc
-        $toast.ExpirationTime = [DateTime]::Now.AddMinutes(1)
-
-        [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($AppId).Show($toast)
-        Write-Log "TOAST OK: Title='$Title' Message='$Message' Sound='$SoundAlias'"
+        Write-Log "SOUND: system alias='$SoundArg'"
     }
     catch {
-        Write-Log "TOAST FAIL: $_"
+        Write-Log "SOUND FAIL (system): $_"
         try { [Console]::Beep(800, 200) } catch { }
     }
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Main
+# Balloon notification
 # ═══════════════════════════════════════════════════════════════════════════
 
-Write-Log "START: Title='$Title' Message='$Message' Sound='$Sound'"
-Register-AppUserModelID
-Show-Toast -Title $Title -Message $Message -SoundAlias $Sound
+function Show-Balloon {
+    param([string]$Title, [string]$Message)
+
+    try {
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        $notify = New-Object System.Windows.Forms.NotifyIcon
+        $notify.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon(
+            (Get-Command powershell.exe).Source
+        )
+        $notify.BalloonTipTitle = $Title
+        $notify.BalloonTipText  = $Message
+        $notify.BalloonTipIcon  = 'Info'
+        $notify.Visible = $true
+        $notify.ShowBalloonTip(7000)
+        Start-Sleep -Milliseconds 300
+        $notify.Dispose()
+        Write-Log "BALLOON OK: Title='$Title'"
+    }
+    catch {
+        Write-Log "BALLOON FAIL: $_"
+        try { [Console]::Beep(800, 200) } catch { }
+    }
+}
+
+# ── Main ──
+Play-NotifySound -SoundArg $Sound
+Show-Balloon -Title $Title -Message $Message
 Write-Log "END"
