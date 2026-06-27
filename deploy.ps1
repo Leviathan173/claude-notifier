@@ -70,17 +70,17 @@ if ($Uninstall) {
         Write-Host $result
     }
 
-    # Remove notification script
-    if (Test-Path $destScript) {
-        Remove-Item $destScript -Force
-        Write-Host "Removed $destScript" -ForegroundColor Green
-    }
-    if (Test-Path "$scriptsDir\hook-wrapper.cmd") {
-        Remove-Item "$scriptsDir\hook-wrapper.cmd" -Force
-        Write-Host "Removed $scriptsDir\hook-wrapper.cmd" -ForegroundColor Green
-    }
-    else {
-        Write-Host "Script not found at $destScript — already removed." -ForegroundColor Gray
+    # Remove notification scripts
+    @(
+        $destScript,
+        "$scriptsDir\hook-wrapper.cmd",
+        "$scriptsDir\hook-wrapper-flash.cmd",
+        "$scriptsDir\flash-glow.ps1"
+    ) | ForEach-Object {
+        if (Test-Path $_) {
+            Remove-Item $_ -Force
+            Write-Host "Removed $_" -ForegroundColor Green
+        }
     }
 
     Write-Host ""
@@ -113,6 +113,8 @@ if (-not (Test-Path $sourceScript)) {
 
 Copy-Item -Force $sourceScript -Destination $destScript
 Copy-Item -Force "$PSScriptRoot\src\hook-wrapper.cmd" -Destination "$scriptsDir\hook-wrapper.cmd"
+Copy-Item -Force "$PSScriptRoot\src\hook-wrapper-flash.cmd" -Destination "$scriptsDir\hook-wrapper-flash.cmd"
+Copy-Item -Force "$PSScriptRoot\src\flash-glow.ps1" -Destination "$scriptsDir\flash-glow.ps1"
 Copy-Item -Force "$PSScriptRoot\src\notification.wav" -Destination "$scriptsDir\notification.wav"
 Write-Host "[2/3] Copied scripts + sound -> $scriptsDir\" -ForegroundColor Green
 

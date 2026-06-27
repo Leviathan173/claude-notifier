@@ -95,55 +95,42 @@ if (action === 'install') {
     let added = 0;
     let skipped = 0;
 
-    for (const def of hookDefs) {
-        // Ensure event array exists
-        if (!Array.isArray(settings.hooks[def.event])) {
-            settings.hooks[def.event] = [];
+    function registerHooks(hookDefs, label) {
+        for (const def of hookDefs) {
+            if (!Array.isArray(settings.hooks[def.event])) {
+                settings.hooks[def.event] = [];
+            }
+            const exists = settings.hooks[def.event].some(
+                (entry) => entry.hooks && entry.hooks[0] &&
+                    entry.hooks[0].command === def.command &&
+                    JSON.stringify(entry.hooks[0].args) === JSON.stringify(def.args || [])
+            );
+            if (exists) {
+                console.log(`  [skip] ${def.desc} — already configured`);
+                skipped++;
+                continue;
+            }
+            const hookObj = { type: 'command', command: def.command, timeout: def.timeout };
+            if (def.args) hookObj.args = def.args;
+            const entry = { hooks: [hookObj] };
+            if (def.matcher) entry.matcher = def.matcher;
+            if (def.matcher) { settings.hooks[def.event].push(entry); }
+            else { settings.hooks[def.event].unshift(entry); }
+            console.log(`  [add] ${label} ${def.desc}`);
+            added++;
         }
-
-        // Check for duplicate (match both command and args)
-        const exists = settings.hooks[def.event].some(
-            (entry) => entry.hooks && entry.hooks[0] &&
-                entry.hooks[0].command === def.command &&
-                JSON.stringify(entry.hooks[0].args) === JSON.stringify(def.args || [])
-        );
-
-        if (exists) {
-            console.log(`  [skip] ${def.desc} — already configured`);
-            skipped++;
-            continue;
-        }
-
-        // Build hook entry (exec form: command + args, no shell)
-        const hookObj = {
-            type: 'command',
-            command: def.command,
-            timeout: def.timeout,
-        };
-        if (def.args) {
-            hookObj.args = def.args;
-        }
-
-        const entry = {
-            hooks: [hookObj],
-        };
-
-        if (def.matcher) {
-            entry.matcher = def.matcher;
-        }
-
-        // Add to start of array for Stop event (without matcher it doesn't matter)
-        if (def.matcher) {
-            // For matched hooks, add after unmatched ones if any
-            settings.hooks[def.event].push(entry);
-        } else {
-            // For unmatched hooks, prepend so they're checked first
-            settings.hooks[def.event].unshift(entry);
-        }
-
-        console.log(`  [add] ${def.desc}`);
-        added++;
     }
+
+    registerHooks(hookDefs, '');
+
+    // Flash hooks — silent breathing glow
+    const flashWrapperPath = require('path').dirname(scriptPath) + '\\hook-wrapper-flash.cmd';
+    const flashHookDefs = [
+        { event:'Stop', matcher:'', command:'cmd', args:['/c',flashWrapperPath,'Task completed - Claude waiting','Green'], timeout:5, desc:'Flash: Stop (green)' },
+        { event:'SubagentStop', matcher:'', command:'cmd', args:['/c',flashWrapperPath,'Subagent task completed','Green'], timeout:5, desc:'Flash: SubagentStop (green)' },
+        { event:'PreToolUse', matcher:'AskUserQuestion', command:'cmd', args:['/c',flashWrapperPath,'Claude needs your input','Yellow'], timeout:5, desc:'Flash: AskUserQuestion (yellow)' },
+    ];
+    registerHooks(flashHookDefs, 'Flash:');
 
     // Write back
     const output = JSON.stringify(settings, null, 2) + '\n';
