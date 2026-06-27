@@ -158,9 +158,11 @@ else if (action === 'uninstall') {
 
         const before = settings.hooks[event].length;
         settings.hooks[event] = settings.hooks[event].filter((entry) => {
-            if (!entry.hooks || !entry.hooks[0]) return true; // keep unknown entries
-            const cmd = entry.hooks[0].command || '';
-            return !cmd.includes('show-notification.ps1') && !cmd.includes('hook-wrapper.cmd');
+            if (!entry.hooks || !entry.hooks[0]) return true;
+            const haystack = (entry.hooks[0].command || '') + ' ' + JSON.stringify(entry.hooks[0].args || []);
+            return !haystack.includes('show-notification.ps1') &&
+                   !haystack.includes('hook-wrapper') &&
+                   !haystack.includes('flash-glow');
         });
         const after = settings.hooks[event].length;
 
