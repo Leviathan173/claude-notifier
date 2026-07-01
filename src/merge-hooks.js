@@ -40,7 +40,7 @@ if (action === 'install') {
     }
 
     // Wrapper path: same dir as the notification script, but hook-wrapper.cmd
-    const wrapperPath = require('path').dirname(scriptPath) + '\\hook-wrapper.cmd';
+    const wrapperPath = path.dirname(scriptPath) + '\\hook-wrapper.cmd';
 
     // Use exec form: command=executable, args=arguments array.
     // This spawns the process directly without a shell — no quoting issues AT ALL.
@@ -116,7 +116,7 @@ if (action === 'install') {
             if (def.matcher) entry.matcher = def.matcher;
             if (def.matcher) { settings.hooks[def.event].push(entry); }
             else { settings.hooks[def.event].unshift(entry); }
-            console.log(`  [add] ${label} ${def.desc}`);
+            console.log(`  [add] ${label ? label + ' ' : ''}${def.desc}`);
             added++;
         }
     }
@@ -124,13 +124,13 @@ if (action === 'install') {
     registerHooks(hookDefs, '');
 
     // Flash hooks — silent breathing glow
-    const flashWrapperPath = require('path').dirname(scriptPath) + '\\hook-wrapper-flash.cmd';
+    const flashWrapperPath = path.dirname(scriptPath) + '\\hook-wrapper-flash.cmd';
     const flashHookDefs = [
         { event:'Stop', matcher:'', command:'cmd', args:['/c',flashWrapperPath,'Task completed - Claude waiting','Green'], timeout:5, desc:'Flash: Stop (green)' },
         { event:'SubagentStop', matcher:'', command:'cmd', args:['/c',flashWrapperPath,'Subagent task completed','Green'], timeout:5, desc:'Flash: SubagentStop (green)' },
         { event:'PreToolUse', matcher:'AskUserQuestion', command:'cmd', args:['/c',flashWrapperPath,'Claude needs your input','Yellow'], timeout:5, desc:'Flash: AskUserQuestion (yellow)' },
     ];
-    registerHooks(flashHookDefs, 'Flash:');
+    registerHooks(flashHookDefs, '');
 
     // Write back
     const output = JSON.stringify(settings, null, 2) + '\n';
@@ -150,10 +150,12 @@ else if (action === 'uninstall') {
         process.exit(0);
     }
 
-    const events = ['Stop', 'SubagentStop', 'PreToolUse'];
+    // Iterate over EVERY event actually present in settings.hooks — the
+    // install list has grown (Elicitation, PermissionRequest, ...) and a
+    // hardcoded list here silently orphans hooks under new events.
     let removed = 0;
 
-    for (const event of events) {
+    for (const event of Object.keys(settings.hooks)) {
         if (!Array.isArray(settings.hooks[event])) continue;
 
         const before = settings.hooks[event].length;

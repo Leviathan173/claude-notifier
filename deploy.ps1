@@ -75,7 +75,8 @@ if ($Uninstall) {
         $destScript,
         "$scriptsDir\hook-wrapper.cmd",
         "$scriptsDir\hook-wrapper-flash.cmd",
-        "$scriptsDir\flash-glow.ps1"
+        "$scriptsDir\flash-glow.ps1",
+        "$scriptsDir\notification.wav"
     ) | ForEach-Object {
         if (Test-Path $_) {
             Remove-Item $_ -Force
@@ -105,17 +106,24 @@ else {
 }
 
 # 2. Copy notification script
-if (-not (Test-Path $sourceScript)) {
-    Write-Host "ERROR: Source script not found at $sourceScript" -ForegroundColor Red
+$sources = @(
+    @{ Src = $sourceScript;                                Dst = $destScript },
+    @{ Src = "$PSScriptRoot\src\hook-wrapper.cmd";        Dst = "$scriptsDir\hook-wrapper.cmd" },
+    @{ Src = "$PSScriptRoot\src\hook-wrapper-flash.cmd";  Dst = "$scriptsDir\hook-wrapper-flash.cmd" },
+    @{ Src = "$PSScriptRoot\src\flash-glow.ps1";          Dst = "$scriptsDir\flash-glow.ps1" },
+    @{ Src = "$PSScriptRoot\src\notification.wav";        Dst = "$scriptsDir\notification.wav" }
+)
+# Verify every source exists BEFORE copying — otherwise ErrorActionPreference=Stop
+# on a missing file mid-loop would leave the install half-applied.
+$missing = $sources | Where-Object { -not (Test-Path $_.Src) } | ForEach-Object { $_.Src }
+if ($missing) {
+    Write-Host "ERROR: Source files missing:" -ForegroundColor Red
+    $missing | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
     Write-Host "Make sure you run deploy.ps1 from the project root." -ForegroundColor Red
     exit 1
 }
 
-Copy-Item -Force $sourceScript -Destination $destScript
-Copy-Item -Force "$PSScriptRoot\src\hook-wrapper.cmd" -Destination "$scriptsDir\hook-wrapper.cmd"
-Copy-Item -Force "$PSScriptRoot\src\hook-wrapper-flash.cmd" -Destination "$scriptsDir\hook-wrapper-flash.cmd"
-Copy-Item -Force "$PSScriptRoot\src\flash-glow.ps1" -Destination "$scriptsDir\flash-glow.ps1"
-Copy-Item -Force "$PSScriptRoot\src\notification.wav" -Destination "$scriptsDir\notification.wav"
+foreach ($item in $sources) { Copy-Item -Force $item.Src -Destination $item.Dst }
 Write-Host "[2/3] Copied scripts + sound -> $scriptsDir\" -ForegroundColor Green
 
 # 3. Merge hooks into settings.json

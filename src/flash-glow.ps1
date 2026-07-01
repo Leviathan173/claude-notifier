@@ -7,6 +7,16 @@
 #>
 param([string]$Color = '#00C853')
 
+$ErrorActionPreference = 'Stop'
+$LogFile = "$env:TEMP\claude-notifier.log"
+function Write-FlashLog {
+    param([string]$Msg)
+    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'
+    try { "[$ts] flash-glow: $Msg" | Out-File -FilePath $LogFile -Append -Encoding utf8 } catch { }
+}
+
+try {
+
 Add-Type -AssemblyName PresentationFramework
 
 # Win32 interop — required so mouse events fall THROUGH the overlay to the
@@ -32,8 +42,7 @@ $xaml = @"
     Topmost='True' ShowActivated='False' ShowInTaskbar='False' WindowStyle='None'
     AllowsTransparency='True' Background='Transparent'
     ResizeMode='NoResize' SizeToContent='Manual'
-    Left='0' Top='0' Width='$W' Height='$H'
-    IsHitTestVisible='False' Focusable='False'>
+    Left='0' Top='0' Width='$W' Height='$H'>
     <Grid>
         <Border Width='$Bar' Height='$H' HorizontalAlignment='Left'
                 VerticalAlignment='Stretch' Opacity='0' Name='L'>
@@ -89,3 +98,8 @@ $win.Add_Loaded({
     $timer.Start()
 })
 $win.ShowDialog() | Out-Null
+
+} catch {
+    Write-FlashLog "ERROR: $($_.Exception.Message)"
+    throw
+}
