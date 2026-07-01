@@ -9,6 +9,17 @@ param([string]$Color = '#00C853')
 
 Add-Type -AssemblyName PresentationFramework
 
+# Win32 interop — required so mouse events fall THROUGH the overlay to the
+# window beneath. WPF's IsHitTestVisible only affects WPF's internal hit-test;
+# the underlying HWND still swallows clicks unless WS_EX_TRANSPARENT is set
+# (and WS_EX_LAYERED is required for WS_EX_TRANSPARENT to take effect).
+Add-Type -Namespace ClaudeNotifier -Name NativeWin -MemberDefinition @'
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    public static extern int GetWindowLong(System.IntPtr hWnd, int nIndex);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    public static extern int SetWindowLong(System.IntPtr hWnd, int nIndex, int dwNewLong);
+'@
+
 $W = [System.Windows.SystemParameters]::PrimaryScreenWidth
 $H = [System.Windows.SystemParameters]::PrimaryScreenHeight
 $Bar = 250
@@ -62,5 +73,19 @@ $timer.Add_Tick({
     $R.Opacity = $opacity
 })
 
-$win.Add_Loaded({ $timer.Start() })
+$win.Add_Loaded({
+    # Make the HWND click-through: OR in WS_EX_TRANSPARENT (0x20) and
+    # WS_EX_LAYERED (0x80000) on GWL_EXSTYLE (-20). Without this, the
+    # borderless full-screen overlay still steals mouse input from the
+    # window underneath, even though its content is transparent.
+    $helper = [System.Windows.Interop.WindowInteropHelper]::new($win)
+    $hwnd = $helper.Handle
+    $GWL_EXSTYLE = -20
+    $WS_EX_TRANSPARENT = 0x20
+    $WS_EX_LAYERED = 0x80000
+    $ex = [ClaudeNotifier.NativeWin]::GetWindowLong($hwnd, $GWL_EXSTYLE)
+    [ClaudeNotifier.NativeWin]::SetWindowLong($hwnd, $GWL_EXSTYLE,
+        $ex -bor $WS_EX_TRANSPARENT -bor $WS_EX_LAYERED) | Out-Null
+    $timer.Start()
+})
 $win.ShowDialog() | Out-Null

@@ -30,6 +30,11 @@ Write-Log "START: Title='$Title' Message='$Message' Sound='$Sound' Flash=$Flash"
 function Play-NotifySound {
     param([string]$SoundArg)
     if ($SoundArg -eq 'Silent') { Write-Log 'SOUND: silent'; return }
+    # Fire-and-forget: SoundPlayer.Play() runs on a worker thread. Callers
+    # MUST keep the host process alive long enough for the wav to finish
+    # (Show-Popup's ShowDialog gives us ~5s, wav is ~2s — plenty). Using the
+    # async form here so the UI thread (which invokes us from Popup.Loaded)
+    # is not blocked while sound plays — otherwise the popup would freeze.
     if ($SoundArg -match '\.wav$' -and (Test-Path $SoundArg)) {
         try { (New-Object System.Media.SoundPlayer ((Resolve-Path $SoundArg).Path)).Play(); Write-Log "SOUND: custom wav='$SoundArg'"; return } catch { Write-Log "SOUND FAIL: $_" }
     }
@@ -54,10 +59,21 @@ function Show-Flash {
 }
 
 function Show-Popup {
-    param([string]$Title, [string]$Message)
+    param([string]$Title, [string]$Message, [string]$Sound = 'Silent')
     try {
         Add-Type -AssemblyName PresentationFramework -ErrorAction Stop
         Add-Type -AssemblyName WindowsBase -ErrorAction Stop
+        # Win32 interop for click-through — WPF's IsHitTestVisible doesn't
+        # reach the HWND, so we OR WS_EX_TRANSPARENT|WS_EX_LAYERED into
+        # GWL_EXSTYLE once the window handle exists.
+        if (-not ('ClaudeNotifier.NativeWin' -as [type])) {
+            Add-Type -Namespace ClaudeNotifier -Name NativeWin -MemberDefinition @'
+                [System.Runtime.InteropServices.DllImport("user32.dll")]
+                public static extern int GetWindowLong(System.IntPtr hWnd, int nIndex);
+                [System.Runtime.InteropServices.DllImport("user32.dll")]
+                public static extern int SetWindowLong(System.IntPtr hWnd, int nIndex, int dwNewLong);
+'@
+        }
         $safeTitle = [System.Security.SecurityElement]::Escape($Title)
         $safeMessage = [System.Security.SecurityElement]::Escape($Message)
         $screenW = [System.Windows.SystemParameters]::PrimaryScreenWidth
@@ -76,11 +92,25 @@ function Show-Popup {
         $timer = New-Object System.Windows.Threading.DispatcherTimer
         $timer.Interval = [TimeSpan]::FromMilliseconds(5000)
         $timer.Add_Tick({ $window.Close(); $timer.Stop() })
-        $window.Add_Loaded({ $timer.Start() })
+        $window.Add_Loaded({
+            $helper = [System.Windows.Interop.WindowInteropHelper]::new($window)
+            $hwnd = $helper.Handle
+            $GWL_EXSTYLE = -20
+            $WS_EX_TRANSPARENT = 0x20
+            $WS_EX_LAYERED = 0x80000
+            $ex = [ClaudeNotifier.NativeWin]::GetWindowLong($hwnd, $GWL_EXSTYLE)
+            [ClaudeNotifier.NativeWin]::SetWindowLong($hwnd, $GWL_EXSTYLE,
+                $ex -bor $WS_EX_TRANSPARENT -bor $WS_EX_LAYERED) | Out-Null
+            $timer.Start()
+            # Play sound AFTER the popup is visible — the user sees the popup
+            # first, then hears the chime. Play() is async so the UI thread
+            # keeps running (opacity/timer stay smooth).
+            Play-NotifySound -SoundArg $Sound
+        })
         $window.ShowDialog() | Out-Null
         Write-Log 'POPUP OK'
     } catch { Write-Log "POPUP FAIL: $_"; try { [Console]::Beep(800, 200) } catch { } }
 }
 
-if ($Flash) { Show-Flash -Color $FlashColor } else { Play-NotifySound -SoundArg $Sound; Show-Popup -Title $Title -Message $Message }
+if ($Flash) { Show-Flash -Color $FlashColor } else { Show-Popup -Title $Title -Message $Message -Sound $Sound }
 Write-Log 'END'
