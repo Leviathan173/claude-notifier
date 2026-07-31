@@ -1,60 +1,69 @@
 /**
  * opencode-notifier.js — OpenCode plugin for Windows desktop notifications.
- *
- * Listens to OpenCode events and triggers the same PowerShell notification
- * scripts used by the Claude Code notifier: WPF popup + breathing glow + wav sound.
- *
- * Installation:
- *   1. Run deploy-opencode.ps1 to copy this file and the PS scripts to OpenCode dirs.
- *   2. Restart OpenCode — the plugin loads automatically from ~/.config/opencode/plugins/.
- *
- * Event mapping:
- *   session.idle        -> "Task completed" (green glow + popup + sound)
- *   session.error        -> "Error occurred" (red glow + popup + sound)
- *   permission.asked     -> "Needs your input" (yellow glow + popup + sound)
- *   session.status (subagent_done) -> "Subagent completed" (green glow + popup + sound)
  */
 
-export const OpencodeNotifier = async ({ project, client, $, directory, worktree }) => {
-    const scriptsDir = "$env:USERPROFILE\\.config\\opencode\\scripts";
+import os from "os";
+import path from "path";
+import fs from "fs";
 
-    async function notify(title, message, color) {
-        const popupScript = `${scriptsDir}\\show-notification.ps1`;
-        const flashScript = `${scriptsDir}\\flash-glow.ps1`;
-        try {
-            await client.app.log({
-                body: { service: "opencode-notifier", level: "info", message: `notify: ${title} - ${message}` },
-            });
-            // Fire popup + sound and glow in parallel
-            await Promise.all([
-                $`powershell -STA -NoProfile -ExecutionPolicy Bypass -File ${popupScript} -Title ${title} -Message ${message} -Sound Default`.quiet(),
-                $`powershell -STA -NoProfile -ExecutionPolicy Bypass -File ${flashScript} -Color ${color}`.quiet(),
-            ]);
-        } catch {
-            // Notifications are best-effort; never break the session.
-        }
-    }
+const LOG_FILE = path.join(os.homedir(), "opencode-notifier-debug.log");
+const scriptsDir = path.join(os.homedir(), ".config", "opencode", "scripts");
+
+function log(msg) {
+    const ts = new Date().toISOString();
+    fs.appendFileSync(LOG_FILE, `[${ts}] ${msg}\n`);
+}
+
+function runPs(script, args) {
+    return new Promise((resolve, reject) => {
+        const fullArgs = ["-STA", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, ...args];
+        const proc = Bun.spawn(["powershell", ...fullArgs], {
+            stdout: "pipe",
+            stderr: "pipe",
+        });
+        proc.exited.then(async (code) => {
+            const stderr = await new Response(proc.stderr).text();
+            if (code === 0) {
+                resolve();
+            } else {
+                reject(new Error(`exit=${code} ${stderr}`));
+            }
+        });
+    });
+}
+
+export const OpencodeNotifier = async ({ project, client, $, directory, worktree }) => {
+    log("=== PLUGIN LOADED ===");
+    let lastNotifiedId = null;
 
     return {
         event: async ({ event }) => {
-            switch (event.type) {
-                case "session.idle":
-                    await notify("OpenCode", "Task completed - waiting", "#00C853");
-                    break;
+            log(`EVENT: type=${event.type}`);
 
-                case "session.error":
-                    await notify("OpenCode", "Error occurred", "#F44336");
-                    break;
-
-                case "permission.asked":
-                    await notify("OpenCode", "Needs your input", "#FFD600");
-                    break;
-
-                case "session.status":
-                    if (event.properties?.status === "subagent_done") {
-                        await notify("OpenCode", "Subagent completed", "#00C853");
+            // When assistant message completes (finish=stop), show notification
+            if (event.type === "message.updated") {
+                const info = event.properties?.info;
+                if (info?.role === "assistant" && info?.finish === "stop") {
+                    // Deduplicate: skip if we already notified for this message
+                    if (lastNotifiedId === info.id) return;
+                    lastNotifiedId = info.id;
+                    log(`NOTIFY: assistant message completed (id=${info.id})`);
+                    try {
+                        const popupScript = path.join(scriptsDir, "show-notification.ps1");
+                        const flashScript = path.join(scriptsDir, "flash-glow.ps1");
+                        await Promise.all([
+                            runPs(popupScript, [
+                                "-Title", "OpenCode",
+                                "-Message", "Response completed",
+                                "-Sound", "Default"
+                            ]),
+                            runPs(flashScript, ["-Color", "#00C853"]),
+                        ]);
+                        log("NOTIFY: success");
+                    } catch (e) {
+                        log(`NOTIFY ERROR: ${e}`);
                     }
-                    break;
+                }
             }
         },
     };
