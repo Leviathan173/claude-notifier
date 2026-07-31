@@ -52,12 +52,42 @@ Windows 桌面通知系统，为 Claude Code 提供三种协同提醒：
 
 日志在 `%TEMP%\claude-notifier.log`。
 
+## OpenCode 部署
+
+### 安装 / 更新
+
+```powershell
+.\deploy-opencode.ps1
+```
+
+脚本会：
+
+1. 把 `src/opencode-notifier.js` 复制到 `~/.config/opencode/plugins/`
+2. 把 `src/show-notification.ps1`、`src/flash-glow.ps1`、`src/notification.wav` 复制到 `~/.config/opencode/scripts/`
+
+**安装完成后需要重启 OpenCode**，插件会在启动时自动加载。
+
+### 卸载
+
+```powershell
+.\deploy-opencode.ps1 -Uninstall
+```
+
+### OpenCode 触发事件
+
+| 事件 | 消息 | 光条颜色 |
+|------|------|---------|
+| `session.idle` | "Task completed - waiting" | 🟢 绿色 |
+| `session.error` | "Error occurred" | 🔴 红色 |
+| `permission.asked` | "Needs your input" | 🟡 黄色 |
+| `session.status` (subagent_done) | "Subagent completed" | 🟢 绿色 |
+
 ## 要求
 
 - Windows 10 / 11
 - PowerShell 5.1+（Windows 自带即可，不需要 PowerShell 7）
 - Node.js（仅 `deploy.ps1` 需要，用于安全合并 `settings.json`）
-- Claude Code（已安装并已初始化 `~/.claude/settings.json`）
+- Claude Code 或 OpenCode（二选一）
 
 **运行时零外部依赖** —— 通知本身只用 .NET Framework 内置的 WPF 和 `System.Media.SoundPlayer`。
 
@@ -66,13 +96,15 @@ Windows 桌面通知系统，为 Claude Code 提供三种协同提醒：
 ```
 claude-notifier/
 ├── src/
-│   ├── show-notification.ps1   # popup 弹窗 + wav 声音
-│   ├── flash-glow.ps1          # 全屏左右呼吸光条
-│   ├── hook-wrapper.cmd        # popup+声音 hook 入口
-│   ├── hook-wrapper-flash.cmd  # 光条 hook 入口
-│   ├── notification.wav        # 默认提示音
-│   └── merge-hooks.js          # 部署时合并 settings.json 的 Node 脚本
-├── deploy.ps1                  # 一键部署 / 卸载
+│   ├── show-notification.ps1    # popup 弹窗 + wav 声音
+│   ├── flash-glow.ps1           # 全屏左右呼吸光条
+│   ├── hook-wrapper.cmd         # popup+声音 hook 入口 (Claude Code)
+│   ├── hook-wrapper-flash.cmd   # 光条 hook 入口 (Claude Code)
+│   ├── notification.wav         # 默认提示音
+│   ├── merge-hooks.js           # 部署时合并 settings.json 的 Node 脚本
+│   └── opencode-notifier.js     # OpenCode 插件
+├── deploy.ps1                   # Claude Code 一键部署 / 卸载
+├── deploy-opencode.ps1          # OpenCode 一键部署 / 卸载
 ├── .gitignore
 └── README.md
 ```
