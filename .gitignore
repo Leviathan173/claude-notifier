@@ -8,3 +8,6 @@ Desktop.ini
 
 # PowerShell
 *.ps1xml
+
+# Local scratch tests
+test/

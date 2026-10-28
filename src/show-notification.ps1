@@ -27,6 +27,14 @@ function Write-Log {
 }
 Write-Log "START: Title='$Title' Message='$Message' Sound='$Sound' Flash=$Flash"
 
+# One turn can produce session.idle and session.execution.succeeded back to back;
+# only the first notification within 2s survives.
+$StampFile = Join-Path $env:TEMP 'claude-notifier.stamp'
+if ((Test-Path $StampFile) -and ((Get-Date) - (Get-Item $StampFile).LastWriteTime).TotalSeconds -lt 2) {
+    Write-Log 'SKIP: duplicate'; exit
+}
+New-Item -ItemType File -Path $StampFile -Force | Out-Null
+
 function Play-NotifySound {
     param([string]$SoundArg)
     if ($SoundArg -eq 'Silent') { Write-Log 'SOUND: silent'; return }
@@ -35,12 +43,14 @@ function Play-NotifySound {
     # (Show-Popup's ShowDialog gives us ~5s, wav is ~2s — plenty). Using the
     # async form here so the UI thread (which invokes us from Popup.Loaded)
     # is not blocked while sound plays — otherwise the popup would freeze.
+    # PlaySync: the -Flash path exits right after this call, and an async Play()
+    # would be cut off by process exit.
     if ($SoundArg -match '\.wav$' -and (Test-Path $SoundArg)) {
-        try { (New-Object System.Media.SoundPlayer ((Resolve-Path $SoundArg).Path)).Play(); Write-Log "SOUND: custom wav='$SoundArg'"; return } catch { Write-Log "SOUND FAIL: $_" }
+        try { (New-Object System.Media.SoundPlayer ((Resolve-Path $SoundArg).Path)).PlaySync(); Write-Log "SOUND: custom wav='$SoundArg'"; return } catch { Write-Log "SOUND FAIL: $_" }
     }
     $autoWav = Join-Path $ScriptDir 'notification.wav'
     if (Test-Path $autoWav) {
-        try { (New-Object System.Media.SoundPlayer $autoWav).Play(); Write-Log "SOUND: auto wav='$autoWav'"; return } catch { Write-Log "SOUND FAIL: $_" }
+        try { (New-Object System.Media.SoundPlayer $autoWav).PlaySync(); Write-Log "SOUND: auto wav='$autoWav'"; return } catch { Write-Log "SOUND FAIL: $_" }
     }
     try {
         switch ($SoundArg) { 'IM' { [System.Media.SystemSounds]::Exclamation.Play(); break } 'Alarm' { [System.Media.SystemSounds]::Hand.Play(); break } default { [System.Media.SystemSounds]::Asterisk.Play(); break } }
@@ -112,5 +122,5 @@ function Show-Popup {
     } catch { Write-Log "POPUP FAIL: $_"; try { [Console]::Beep(800, 200) } catch { } }
 }
 
-if ($Flash) { Show-Flash -Color $FlashColor } else { Show-Popup -Title $Title -Message $Message -Sound $Sound }
+if ($Flash) { Show-Flash -Color $FlashColor; Play-NotifySound -SoundArg $Sound } else { Show-Popup -Title $Title -Message $Message -Sound $Sound }
 Write-Log 'END'
